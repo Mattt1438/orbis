@@ -1106,6 +1106,7 @@ function intro(P) {
   if (P.extraPlayerHome) s += ' Tu démarres avec deux bases.';
   if (P.breather) s += ' Un niveau plus calme.';
   if (P.daily) s = 'Même carte pour tout le monde aujourd’hui. ' + s;
+  else s += ` Étoile rapide : moins de ${fmtTime(parTime(P))}.`;
   $('introN').textContent = levelName(P); $('introS').textContent = s;
   const el = $('intro'); el.classList.add('on');
   clearTimeout(intro.tm); intro.tm = setTimeout(() => el.classList.remove('on'), 2600);
@@ -1178,13 +1179,16 @@ function finish(win) {
     text = win ? `Défi réussi en ${fmtTime(time)}. Un nouveau défi t’attend demain.` : 'Ta flotte a été anéantie. Le défi reste le même jusqu’à demain : réessaie.';
     goTxt = win ? 'Rejouer le défi' : 'Réessayer'; go = startDaily;
   } else if (win) {
-    stars = 1 + (G.lost ? 0 : 1) + (!G.lost && time <= parTime(P) ? 1 : 0);
+    // Étoiles indépendantes : victoire, rapidité, aucune planète perdue.
+    const fast = time <= parTime(P);
+    stars = 1 + (fast ? 1 : 0) + (G.lost ? 0 : 1);
     const prevT = save.times[L];
     save.stars[L] = Math.max(save.stars[L] || 0, stars);
     save.times[L] = Math.round(prevT ? Math.min(prevT, time) : time);
     save.best = Math.max(save.best, L + 1); save.level = L + 1; save.fail = null;
     text = `Niveau ${L} terminé en ${fmtTime(time)}.` + (prevT && time < prevT ? ' Nouveau record !' : prevT ? ` Record : ${fmtTime(prevT)}.` : '');
-    if (stars < 3) text += G.lost ? ' Ne perds aucune planète pour plus d’étoiles.' : ` 3e étoile : finis en moins de ${fmtTime(parTime(P))}.`;
+    if (!fast) text += ` Étoile manquée : finir en moins de ${fmtTime(parTime(P))}.`;
+    if (G.lost) text += ' Étoile manquée : tu as perdu une planète.';
     goTxt = `Jouer le niveau ${L + 1}`; go = () => startLevel(L + 1);
   } else {
     save.level = L;
