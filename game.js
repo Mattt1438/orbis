@@ -73,7 +73,7 @@ function segD(a, b, c) {
   return Math.hypot(a.x + dx * u - c.x, a.y + dy * u - c.y);
 }
 function route(a, b) {
-  if (G.hole && segD(a, b, G.hole) < G.hole.r + 22) return Infinity;
+  if (G.hole && segD(a, b, G.hole) < G.hole.r + 36) return Infinity;  // 36 : écart latéral max d'une flotte (sendShips)
   const d = dist(a, b);
   return G.storm && segD(a, b, G.storm) < G.storm.r ? d * 1.7 : d;
 }
@@ -96,6 +96,10 @@ const SAVE_KEY = 'orbis.v1';
 function load() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch (e) { return {}; } }
 // stars/times : meilleur résultat par niveau ; daily : défi du jour réussi ; fail : défaites d'affilée au même niveau.
 const save = Object.assign({ level: 1, best: 1, pct: 0.5, muted: false, speed: 1, seen: {}, stars: {}, times: {}, daily: null, fail: null }, load());
+// Sauvegarde abîmée ou partielle : on répare plutôt que de planter au démarrage.
+for (const k of ['seen', 'stars', 'times']) if (!save[k] || typeof save[k] !== 'object') save[k] = {};
+if (save.daily && typeof save.daily.t !== 'number') save.daily = null;
+if (save.fail && typeof save.fail.n !== 'number') save.fail = null;
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
 
 /* ---------- Son (synthétisé) ---------- */
@@ -114,7 +118,7 @@ const Snd = {
     } catch (e) { this.ac = null; }
   },
   // Contexte suspendu quand le son est coupé ou l'app cachée : le fond sonore ne tourne pas pour rien.
-  wake() { if (this.ac && this.ac.state === 'suspended' && !save.muted && !document.hidden) this.ac.resume(); },
+  wake() { if (this.ac && this.ac.state !== 'running' && !save.muted && !document.hidden) this.ac.resume().catch(() => {}); },  // iOS : état « interrupted » après un appel
   sleep() { if (this.ac && this.ac.state === 'running') this.ac.suspend(); },
   setMuted(m) {
     save.muted = m; persist(); if (!this.out) return;
@@ -273,8 +277,9 @@ function layout() {
   view.oy = a.top + (a.h - G.H * view.sc) / 2;
 }
 function resize() {
-  dpr = Math.min(2, window.devicePixelRatio || 1);
-  view.w = Math.max(1, document.body.clientWidth); view.h = Math.max(1, document.body.clientHeight);
+  const d = Math.min(2, window.devicePixelRatio || 1), w = Math.max(1, document.body.clientWidth), h = Math.max(1, document.body.clientHeight);
+  if (BG && d === dpr && w === view.w && h === view.h) return;  // l'événement et le ResizeObserver arrivent en double
+  dpr = d; view.w = w; view.h = h;
   cv.width = Math.round(view.w * dpr); cv.height = Math.round(view.h * dpr);
   layout();
   buildBg(G.P ? G.P.seed : 1);
@@ -1138,7 +1143,7 @@ function drawHole(c, x, y, r, t) {
   c.fillStyle = '#000'; c.beginPath(); c.arc(x, y, r * 0.55, 0, TAU); c.fill();
   c.strokeStyle = 'rgba(255,215,170,.85)'; c.lineWidth = 1.4; c.stroke();
   c.setLineDash([3, 6]); c.lineDashOffset = -t * 6; c.strokeStyle = 'rgba(255,90,90,.35)'; c.lineWidth = 1;
-  c.beginPath(); c.arc(x, y, r + 22, 0, TAU); c.stroke(); c.setLineDash([]);
+  c.beginPath(); c.arc(x, y, r + 36, 0, TAU); c.stroke(); c.setLineDash([]);
 }
 function drawStorm(c, x, y, r, t) {
   c.fillStyle = 'rgba(110,140,255,.07)'; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
@@ -1149,7 +1154,7 @@ function drawStorm(c, x, y, r, t) {
     c.beginPath(); c.arc(x, y, rr, a, a + 1.6); c.stroke();
   }
   const q = Math.floor(t * 4);
-  if (hrand(q * 7 + 1) > 0.8) {
+  if (!REDUCED && hrand(q * 7 + 1) > 0.8) {
     let a = hrand(q) * TAU, px = x + Math.cos(a) * r * 0.2, py = y + Math.sin(a) * r * 0.2;
     c.strokeStyle = 'rgba(220,235,255,.6)'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(px, py);
     for (let j = 1; j < 6; j++) { a += (hrand(q + j * 13) - 0.5) * 1.2; px += Math.cos(a) * r * 0.13; py += Math.sin(a) * r * 0.13; c.lineTo(px, py); }
@@ -1441,7 +1446,7 @@ function refreshMenu() {
   menuL = clamp(save.level, 1, save.best);
   updMenu();
 }
-const starStr = n => '★'.repeat(n) + '☆'.repeat(3 - n);
+const starStr = n => { n = clamp(n | 0, 0, 3); return '★'.repeat(n) + '☆'.repeat(3 - n); };
 function updMenu() {
   $('play').textContent = save.best === 1 ? 'Commencer' : `Jouer le niveau ${menuL}`;
   $('stepper').hidden = save.best <= 1;
@@ -1466,7 +1471,7 @@ $('pMenu').addEventListener('click', toMenu);
 $('endMenu').addEventListener('click', toMenu);
 document.addEventListener('visibilitychange', () => { if (document.hidden) { pause(); Snd.sleep(); } else Snd.wake(); });
 window.addEventListener('keydown', e => {
-  if (e.key === 'Escape' || e.key === ' ') { if (G.mode === 'play' && !G.over) { e.preventDefault(); G.paused ? resume() : pause(); } }
+  if (e.key === 'Escape' || e.key === ' ') { if (G.mode === 'play' && !G.over && !G.cardOpen) { e.preventDefault(); G.paused ? resume() : pause(); } }
 });
 
 function setupPower() {
@@ -1487,7 +1492,7 @@ function updateHud() {
   goal($('gSafe'), !G.lost, 'Aucune planète perdue');
 }
 
-function intro(P) {
+function intro(P, then) {
   const words = ['', 'Un adversaire.', 'Deux adversaires.', 'Trois adversaires.'];
   let s = words[P.enemies];
   if (P.extraEnemyHome) s += ' Il démarre avec deux bases.';
@@ -1497,11 +1502,11 @@ function intro(P) {
   for (const m of P.mods) s += ' ' + MODS[m];
   const ps = Object.keys(P.persona).map((f, i) => `${FNAME[f]} ${i ? '' : 'est '}${PERS[P.persona[f]].n[+f === 4 ? 1 : 0]}`);
   if (ps.length) s += ' ' + ps.join(', ') + '.';
-  if (P.daily) s = 'Même carte pour tout le monde aujourd’hui. ' + s;
+  if (P.daily) s = 'Un nouveau défi chaque jour. ' + s;
   else s += ` Étoile rapide : moins de ${fmtTime(parTime(P))}.`;
   $('introN').textContent = levelName(P); $('introS').textContent = s;
   const el = $('intro'); el.classList.add('on');
-  clearTimeout(intro.tm); intro.tm = setTimeout(() => el.classList.remove('on'), s.length > 50 ? 4000 : 2600);
+  clearTimeout(intro.tm); intro.tm = setTimeout(() => { el.classList.remove('on'); if (then) then(); }, clamp(1500 + s.length * 45, 2600, 9000));
 }
 
 const HINTS = {
@@ -1557,7 +1562,7 @@ function renderCard(t) {
   drawOrbits(c, cardNode, t, { k: 2 * s, ox: 132, oy: 132 });
 }
 
-function fmtTime(s) { const m = Math.floor(s / 60), r = Math.round(s % 60); return m ? `${m} min ${r} s` : `${r} s`; }
+function fmtTime(s) { s = Math.round(s); const m = Math.floor(s / 60), r = s % 60; return m ? `${m} min ${r} s` : `${r} s`; }
 
 // Temps de référence pour la 3e étoile : grandit avec la taille de la carte.
 const parTime = P => 45 + P.nodeCount * 7;
@@ -1621,11 +1626,13 @@ function play(P) {
   Snd.ensure();
   G.mode = 'play'; G.paused = false; G.cardOpen = false;
   $('hud').hidden = false; $('dock').hidden = false; showScreen(null);
-  $('lvl').textContent = levelName(P);
+  $('lvl').textContent = P.daily ? 'Défi' : levelName(P);  // court : le HUD tient en 320 px
   buildWorld(P, false);
   update(0);  // calcule flotte et maximum pour le HUD, même si une carte met le jeu en pause
-  setupPower(); updateHud(); endHints(); render();
-  openCards(P, () => { intro(P); if (!P.daily) startHints(P.L); });
+  clearTimeout(advanceHint.tm); G.hints = null; setHint('');  // relancer ne marque pas le didacticiel comme vu
+  setupPower(); updateHud(); render();
+  // L'indice arrive après l'intro : sur petit écran, les deux se chevauchent.
+  openCards(P, () => intro(P, () => { if (G.P === P && G.mode === 'play' && !P.daily) startHints(P.L); }));
 }
 
 function startDemo() {
@@ -1660,7 +1667,7 @@ function frame(now) {
     const sp = G.mode === 'play' ? save.speed : 1;
     for (let i = 0; i < sp; i++) update(dt);
   }
-  if (G.mode === 'play') { G.hudT -= dt; if (G.hudT <= 0) { G.hudT = 0.25; updateHud(); } }
+  if (G.mode === 'play' && !G.over) { G.hudT -= dt; if (G.hudT <= 0) { G.hudT = 0.25; updateHud(); } }
   render();
 }
 

@@ -1,5 +1,5 @@
 // Bump VERSION on every deploy, or installed phones keep the old cache.
-const VERSION = 'orbis-v1';
+const VERSION = 'orbis-v2';
 const FILES = ['./', 'index.html', 'game.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
