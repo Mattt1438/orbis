@@ -113,8 +113,14 @@ button:focus-visible{outline:2px solid var(--you);outline-offset:3px}
 .row{display:flex;gap:10px;width:100%;justify-content:center}
 #pause,#end,#card{justify-content:flex-start;overflow-y:auto}
 .panel{margin:auto 0;flex-shrink:0}
-.panel .stars{font-size:26px;margin:-4px 0 8px}
-@media (max-height:460px){.screen{padding:10px}.panel{padding:16px 20px 14px}.panel h2{font-size:22px;margin-bottom:6px}.panel p{margin-bottom:12px;font-size:14px}.panel .stack{gap:8px}.primary{min-height:46px}.ghost{min-height:40px}#cardCv{width:84px;height:84px;margin:-4px auto 2px}}
+.goals{list-style:none;margin:6px 0 16px;padding:0;display:grid;gap:8px;text-align:left}
+.goals li{display:flex;align-items:center;gap:10px;font-size:15px;color:var(--ink)}
+.goals li b{font-size:22px;line-height:1;color:#ffc24a;width:24px;text-align:center;font-weight:400}
+.goals li em{margin-left:auto;font-style:normal;font-size:13px;font-weight:700;color:#8dffb0}
+.goals li.miss{color:var(--ink-dim)}
+.goals li.miss b{color:rgba(255,255,255,.28)}
+.goals li.miss em{color:#ff8a80}
+@media (max-height:460px){.goals{gap:4px;margin:2px 0 10px}.screen{padding:10px}.panel{padding:16px 20px 14px}.panel h2{font-size:22px;margin-bottom:6px}.panel p{margin-bottom:12px;font-size:14px}.panel .stack{gap:8px}.primary{min-height:46px}.ghost{min-height:40px}#cardCv{width:84px;height:84px;margin:-4px auto 2px}}
 @media (prefers-reduced-motion: reduce){.title{animation:none}#intro,#hint{transition:none}}
 </style>
 </head>
@@ -178,7 +184,7 @@ button:focus-visible{outline:2px solid var(--you);outline-offset:3px}
 <div id="end" class="screen" hidden>
   <div class="panel">
     <h2 id="endT">Victoire</h2>
-    <div class="stars" id="endStars" aria-hidden="true"></div>
+    <ul class="goals" id="endStars"></ul>
     <p id="endS"></p>
     <div class="stack">
       <button class="primary" id="endGo">Niveau suivant</button>

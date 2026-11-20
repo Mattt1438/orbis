@@ -1172,7 +1172,7 @@ function finish(win) {
   if (G.over) return;
   G.over = true; G.gest = null; G.sel.clear(); endHints();
   const P = G.P, L = P.L, time = G.t;
-  let title = win ? 'Victoire' : 'Défaite', text, go, goTxt, stars = 0, skip = false;
+  let title = win ? 'Victoire' : 'Défaite', text, go, goTxt, goals = null, skip = false;
   if (win) { Snd.win(); vib(30); } else Snd.lose();
   if (P.daily) {
     if (win && !(save.daily && save.daily.d === P.daily && save.daily.t <= time)) save.daily = { d: P.daily, t: Math.round(time) };
@@ -1181,14 +1181,13 @@ function finish(win) {
   } else if (win) {
     // Étoiles indépendantes : victoire, rapidité, aucune planète perdue.
     const fast = time <= parTime(P);
-    stars = 1 + (fast ? 1 : 0) + (G.lost ? 0 : 1);
+    goals = [[true, 'Gagner le niveau'], [fast, `Finir en moins de ${fmtTime(parTime(P))}`], [!G.lost, 'Ne perdre aucune planète']];
+    const stars = goals.filter(g => g[0]).length;
     const prevT = save.times[L];
     save.stars[L] = Math.max(save.stars[L] || 0, stars);
     save.times[L] = Math.round(prevT ? Math.min(prevT, time) : time);
     save.best = Math.max(save.best, L + 1); save.level = L + 1; save.fail = null;
     text = `Niveau ${L} terminé en ${fmtTime(time)}.` + (prevT && time < prevT ? ' Nouveau record !' : prevT ? ` Record : ${fmtTime(prevT)}.` : '');
-    if (!fast) text += ` Étoile manquée : finir en moins de ${fmtTime(parTime(P))}.`;
-    if (G.lost) text += ' Étoile manquée : tu as perdu une planète.';
     goTxt = `Jouer le niveau ${L + 1}`; go = () => startLevel(L + 1);
   } else {
     save.level = L;
@@ -1201,8 +1200,8 @@ function finish(win) {
   setTimeout(() => {
     if (G.mode !== 'play' || !G.over || G.P !== P) return;
     $('endT').textContent = title; $('endS').textContent = text;
-    $('endStars').textContent = stars ? starStr(stars) : '';
-    $('endStars').hidden = !stars;
+    $('endStars').innerHTML = goals ? goals.map(([ok, t]) => `<li${ok ? '' : ' class="miss"'}><b aria-hidden="true">${ok ? '★' : '☆'}</b>${t}<em>${ok ? 'Atteint' : 'Manqué'}</em></li>`).join('') : '';
+    $('endStars').hidden = !goals;
     $('endGo').textContent = goTxt; $('endGo').onclick = go;
     $('endSkip').hidden = !skip;
     showScreen('end'); $('endGo').focus();
