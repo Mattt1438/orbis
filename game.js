@@ -1233,7 +1233,7 @@ function render() {
 
   const sel = g ? g.sel : G.sel;
   if (sel.size) {
-    c.strokeStyle = `rgba(255,255,255,${0.55 + 0.3 * Math.sin(t * 6)})`; c.lineWidth = 1.6;
+    c.strokeStyle = `rgba(255,255,255,${REDUCED ? 0.8 : 0.55 + 0.3 * Math.sin(t * 6)})`; c.lineWidth = 1.6;
     for (const s of sel) { c.beginPath(); c.arc(s.x, s.y, s.r + 12, 0, TAU); c.stroke(); }
   }
 
