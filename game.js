@@ -35,7 +35,46 @@ const T = {
   forge:   { r: 33, prod: 1.8,  cap: 60, ct: 11 },
   bastion: { r: 21, prod: 0.2,  cap: 10, ct: 8, range: 155, rate: 2.2 },
   relay:   { r: 20, prod: 0.3,  cap: 12, ct: 5 },
+  mother:  { r: 38, prod: 1.6,  cap: 70, ct: 14, range: 120, rate: 1.2 },
 };
+
+/* ---------- Variantes, caractères, boss (niveau 11+) ---------- */
+const FNAME = ['', '', 'Corail', 'Or', 'Orchidée'];
+const MODS = { hole: 'Trou noir au centre.', storm: 'Tempête au centre.', rich: 'Production accrue.' };
+const PERS = {
+  rush:   { n: ['fonceur', 'fonceuse'], aiInterval: 0.7, aggr: 1.3, margin: 1, defend: 0.8 },
+  turtle: { n: ['prudent', 'prudente'], aiInterval: 1.15, aggr: 0.5, margin: 1.15, defend: 1.4 },
+  opp:    { n: ['opportuniste', 'opportuniste'], aiInterval: 1, aggr: 1, margin: 1, defend: 1, opp: true },
+};
+// Tirages séparés de makeParams pour ne décaler aucune carte existante.
+function addVariants(P) {
+  P.mods = []; P.persona = {};
+  if (P.L < 11) return P;
+  const r = mulberry32(hash(P.L * 31337 + 5));
+  const x = r();
+  if (!P.boss) {
+    if (x < 0.3) P.mods.push('hole'); else if (x < 0.6) P.mods.push('storm'); else if (x < 0.8) P.mods.push('rich');
+    if (P.L >= 16 && r() < 0.35) P.mods.push(P.mods[0] === 'rich' ? (r() < 0.5 ? 'hole' : 'storm') : 'rich');
+  }
+  P.rich = P.mods.includes('rich');
+  const ks = Object.keys(PERS);
+  for (let f = 2; f <= P.enemies + 1; f++) P.persona[f] = ks[(r() * ks.length) | 0];
+  return P;
+}
+function aiParams(P, f) {
+  const m = PERS[P.persona && P.persona[f]]; if (!m) return null;
+  return Object.assign({}, P, { aiInterval: P.aiInterval * m.aiInterval, aggr: Math.min(1, P.aggr * m.aggr), margin: P.margin * m.margin, defend: P.defend * m.defend, opp: !!m.opp });
+}
+// Coût d'un trajet pour l'IA : infini à travers le trou noir, rallongé dans la tempête.
+function segD(a, b, c) {
+  const dx = b.x - a.x, dy = b.y - a.y, u = clamp(((c.x - a.x) * dx + (c.y - a.y) * dy) / (dx * dx + dy * dy || 1), 0, 1);
+  return Math.hypot(a.x + dx * u - c.x, a.y + dy * u - c.y);
+}
+function route(a, b) {
+  if (G.hole && segD(a, b, G.hole) < G.hole.r + 22) return Infinity;
+  const d = dist(a, b);
+  return G.storm && segD(a, b, G.storm) < G.storm.r ? d * 1.7 : d;
+}
 
 const CARDS = {
   outpost: { t: 'Satellite', s: 'Petit et vite capturé. Il produit peu, mais chaque capture augmente ta flotte maximale.' },
@@ -43,6 +82,11 @@ const CARDS = {
   relay:   { t: 'Relais', s: 'Les vaisseaux qui partent d’un relais que tu contrôles voyagent deux fois plus vite. Idéal pour frapper loin.' },
   bastion: { t: 'Bastion', s: 'Une fois capturé, il abat les vaisseaux ennemis à portée, en vol comme en orbite. Neutre, il reste inactif.' },
   garrison:{ t: 'Garnisons', s: 'Certaines planètes et installations neutres sont gardées. Envoie plus de vaisseaux que la garnison pour les capturer.' },
+  hole:    { t: 'Trou noir', s: 'Tout vaisseau qui passe trop près du centre est englouti. Contourne-le en faisant escale ailleurs.', type: 'star', draw: (c, t) => drawHole(c, 0, 0, 30, t) },
+  storm:   { t: 'Tempête', s: 'Au centre, une tempête ralentit beaucoup les vaisseaux. Un détour est parfois plus rapide.', type: 'star', draw: (c, t) => drawStorm(c, 0, 0, 48, t) },
+  rich:    { t: 'Abondance', s: 'Tout produit plus vite, chez toi comme chez l’ennemi. La partie s’emballe : attaque tôt.', type: 'star' },
+  persona: { t: 'Caractères', s: 'Chaque adversaire a son style. Le fonceur attaque sans cesse, le prudent se défend, l’opportuniste frappe les plus faibles.', type: 'home', owner: 2 },
+  boss:    { t: 'Boss', s: 'Un vaisseau-mère. Il produit beaucoup et abat les vaisseaux à portée. Frappe-le d’un seul coup, avec une grosse vague.', type: 'mother', owner: 2 },
 };
 
 /* ---------- Sauvegarde ---------- */
@@ -220,8 +264,9 @@ function buildBg(seed) {
 function makeParams(L) {
   const r = mulberry32(hash(L * 7919 + 13));
   const t = 1 - 1 / (1 + (L - 1) / 9);
-  const breather = L > 4 && L % 5 === 0;
-  const d = breather ? t * 0.55 : t;
+  const boss = L >= 20 && L % 10 === 0;
+  const breather = L > 4 && L % 5 === 0 && !boss;
+  const d = breather ? t * 0.55 : boss ? t * 0.8 : t;
   let enemies = 1;
   if (L === 6) enemies = 2;
   else if (L > 6) {
@@ -233,8 +278,8 @@ function makeParams(L) {
   if (L >= 4) types.push('forge');
   if (L >= 5) types.push('relay');
   if (L >= 7) types.push('bastion');
-  return {
-    L, d, enemies, types, breather,
+  return addVariants({
+    L, d, enemies, types, breather, boss,
     garrison: L >= 10,
     nodeCount: clamp(Math.round(5 + L * 0.42 + r() * 3) + (enemies - 1) * 2, 6, 22),
     seed: hash(L * 104729 + 7),
@@ -250,7 +295,7 @@ function makeParams(L) {
     enemyProd: 1 + 0.35 * d * (enemies === 1 ? 1 : 0.55),
     extraEnemyHome: L >= 9 && enemies === 1 && r() < 0.3 + d * 0.3,
     extraPlayerHome: enemies >= 3 || (enemies === 2 && r() < 0.5),
-  };
+  });
 }
 
 function genLevel(P, aspect) {
@@ -265,6 +310,7 @@ function genLevel(P, aspect) {
   };
   const fits = (x, y, r, gap = 56) => {
     if (x < M + r || x > W - M - r || y < M + r || y > H - M - r) return false;
+    if (P.mods.includes('hole') && Math.hypot(cx - x, cy - y) < r + 30 + gap) return false;
     for (const n of nodes) if (Math.hypot(n.x - x, n.y - y) < n.r + r + gap) return false;
     return true;
   };
@@ -348,10 +394,13 @@ function buildWorld(P, demo) {
   G.P = P; G.demo = demo; G.t = 0; G.ships = []; G.parts = []; G.over = false; G.sel = new Set(); G.gest = null;
   G.checkT = 0; G.hudT = 0; G.sent = 0;
   G.facs = []; for (let f = 1; f <= P.enemies + 1; f++) G.facs.push(f);
-  G.ai = {}; for (const f of G.facs) if (f !== 1 || demo) G.ai[f] = { t: P.aiDelay * (0.8 + Math.random() * 0.4) };
+  G.ai = {}; for (const f of G.facs) if (f !== 1 || demo) G.ai[f] = { t: P.aiDelay * (0.8 + Math.random() * 0.4), p: aiParams(P, f) };
   const a = playArea();
   const L = genLevel(P, a.w / a.h);
   G.W = L.W; G.H = L.H; G.nodes = L.nodes;
+  G.hole = P.mods.includes('hole') ? { x: G.W / 2, y: G.H / 2, r: 30 } : null;
+  G.storm = P.mods.includes('storm') ? { x: G.W / 2, y: G.H / 2, r: Math.min(G.W, G.H) * 0.28 } : null;
+  if (P.boss) for (const n of G.nodes) if (n.type === 'home' && n.owner === 2) { n.type = 'mother'; n.r = T.mother.r; break; }
   for (const n of G.nodes) if (n.type === 'home' || n.type === 'star') n.tex = makePlanet(P.seed + n.id * 7919);
   layout(); buildBg(P.seed);
 }
@@ -406,20 +455,22 @@ function update(dt) {
   for (const n of N) {
     const o = n.owner;
     if (o > 0 && n.hp >= 1 && tot[o] < cap[o]) {
-      n.acc += dt * T[n.type].prod * (G.demo || o === 1 ? 1 : P.enemyProd);
+      n.acc += dt * T[n.type].prod * (G.demo || o === 1 ? 1 : P.enemyProd) * (P.rich && !n.fight ? 1.6 : 1);
       while (n.acc >= 1) { n.acc -= 1; n.ships[o]++; tot[o]++; }
     }
   }
 
   // vaisseaux en vol
+  const ho = G.hole, st = G.storm;
   for (let i = SH.length - 1; i >= 0; i--) {
     const s = SH[i];
     if (s.delay > 0) { s.delay -= dt; continue; }
-    s.prog += s.spd * dt / s.len;
+    s.prog += s.spd * dt / s.len * (st && Math.hypot(s.x - st.x, s.y - st.y) < st.r ? 0.4 : 1);
     if (s.prog >= s.end) { s.to.ships[s.f]++; s.to.flash = Math.min(1, s.to.flash + 0.06); SH[i] = SH[SH.length - 1]; SH.pop(); continue; }
     const b = Math.sin(Math.PI * s.prog) * s.off;
     s.x = s.sx + (s.ex - s.sx) * s.prog + s.nx * b;
     s.y = s.sy + (s.ey - s.sy) * s.prog + s.ny * b;
+    if (ho && Math.hypot(s.x - ho.x, s.y - ho.y) < ho.r) { spark(s.x, s.y, s.f, 2, 30); SH[i] = SH[SH.length - 1]; SH.pop(); }
   }
 
   // combats et captures
@@ -459,10 +510,10 @@ function update(dt) {
     }
   }
 
-  // bastions
-  const R = T.bastion.range, R2 = R * R;
+  // bastions et vaisseau-mère
   for (const n of N) {
-    if (n.type !== 'bastion' || n.owner <= 0 || n.hp < 1) continue;
+    const tp = T[n.type], R = tp.range, R2 = R * R;
+    if (!R || n.owner <= 0 || n.hp < 1) continue;
     n.cool -= dt; if (n.cool > 0) continue;
     const o = n.owner; let best = -1, bd = R2;
     for (let i = 0; i < SH.length; i++) {
@@ -472,7 +523,7 @@ function update(dt) {
     }
     if (best >= 0) {
       const s = SH[best]; beam(n, s.x, s.y, o); spark(s.x, s.y, s.f, 5);
-      SH[best] = SH[SH.length - 1]; SH.pop(); n.cool = 1 / T.bastion.rate;
+      SH[best] = SH[SH.length - 1]; SH.pop(); n.cool = 1 / tp.rate;
       if (!G.demo && (o === 1 || s.f === 1)) Snd.zap();
       continue;
     }
@@ -483,13 +534,13 @@ function update(dt) {
     }
     if (tn) {
       const a = Math.random() * TAU, rr = tn.r + 8 + Math.random() * 14, x = tn.x + Math.cos(a) * rr, y = tn.y + Math.sin(a) * rr;
-      tn.ships[tf]--; beam(n, x, y, o); spark(x, y, tf, 5); n.cool = 1 / T.bastion.rate;
+      tn.ships[tf]--; beam(n, x, y, o); spark(x, y, tf, 5); n.cool = 1 / tp.rate;
       if (!G.demo && (o === 1 || tf === 1)) Snd.zap();
     } else n.cool = 0.2;
   }
 
   // IA
-  for (const k in G.ai) { const A = G.ai[k]; A.t -= dt; if (A.t <= 0) { A.t = P.aiInterval * (0.75 + Math.random() * 0.5); aiThink(+k); } }
+  for (const k in G.ai) { const A = G.ai[k]; A.t -= dt; if (A.t <= 0) { A.t = (A.p || P).aiInterval * (0.75 + Math.random() * 0.5); aiThink(+k); } }
 
   // particules
   const PT = G.parts;
@@ -524,7 +575,7 @@ function checkEnd() {
 
 /* ---------- IA ---------- */
 function aiThink(f) {
-  const P = G.P, N = G.nodes;
+  const P = (G.ai[f] && G.ai[f].p) || G.P, N = G.nodes;
   const inc = N.map(() => [0, 0, 0, 0, 0]);
   for (const s of G.ships) inc[s.to.id][s.f]++;
   const enemyAt = n => { let e = 0; for (let g = 0; g < 5; g++) if (g !== f) e += n.ships[g]; return e; };
@@ -541,7 +592,7 @@ function aiThink(f) {
   if (!any) return;
   let moves = 0;
   const gather = (target, need) => {
-    const src = [...avail.entries()].filter(([n, a]) => a > 0 && n !== target).sort((A, B) => dist(A[0], target) - dist(B[0], target));
+    const src = [...avail.entries()].filter(([n, a]) => a > 0 && n !== target && isFinite(route(n, target))).sort((A, B) => route(A[0], target) - route(B[0], target));
     let sum = 0; const picks = [];
     for (const [n, a] of src) { const take = Math.min(a, need - sum); picks.push([n, take]); sum += take; if (sum >= need) break; }
     return sum >= need ? picks : null;
@@ -558,16 +609,17 @@ function aiThink(f) {
   const cands = [];
   for (const n of N) {
     if (n.owner === f) continue;
-    let nd = Infinity; for (const [s, a] of avail) if (a > 0) nd = Math.min(nd, dist(s, n));
+    let nd = Infinity; for (const [s, a] of avail) if (a > 0) nd = Math.min(nd, route(s, n));
     if (!isFinite(nd)) continue;
     const tp = T[n.type];
     let def = enemyAt(n) + enemyInc(n);
     if (n.owner > 0) def += tp.prod * (nd / SPEED) * 0.8;
-    for (const b of N) if (b.type === 'bastion' && b.owner > 0 && b.owner !== f && b.hp >= 1 && dist(b, n) < T.bastion.range + n.r) def += 7;
+    for (const b of N) if (T[b.type].range && b.owner > 0 && b.owner !== f && b.hp >= 1 && dist(b, n) < T[b.type].range + n.r) def += b.type === 'mother' ? 16 : 7;
     const need = Math.ceil(def * P.margin + (n.owner === 0 ? 2 + tp.ct * 0.4 : 4) - inc[n.id][f] - n.ships[f]);
     if (need <= 0) continue;
     let val = tp.prod * 2 + tp.cap * 0.02 + (n.type === 'bastion' ? 1.2 : 0);
     if (n.owner > 0) val += P.aggr * 0.8 + (n.owner === 1 && !G.demo ? 0.4 * P.aggr : 0);
+    if (P.opp && (n.fight > 0 || (n.owner > 0 && (n.hp < 1 || G.tot[n.owner] < G.tot[f] * 0.6)))) val += 1.5;
     const score = val / (1 + need * 0.05) / (1 + nd / 220) * (1 - P.noise * 0.5 + Math.random() * P.noise);
     cands.push({ n, need, score });
   }
@@ -583,7 +635,7 @@ function aiThink(f) {
     const front = n => { let m = Infinity; for (const e of foes) m = Math.min(m, dist(n, e)); return m; };
     let fr = owned[0]; for (const n of owned) if (front(n) < front(fr)) fr = n;
     let rr = null; for (const n of owned) if (n !== fr && (avail.get(n) || 0) >= 8 && (!rr || front(n) > front(rr))) rr = n;
-    if (rr && front(rr) > front(fr) + 80) sendShips(rr, fr, f, Math.floor(avail.get(rr) * 0.7));
+    if (rr && front(rr) > front(fr) + 80 && isFinite(route(rr, fr))) sendShips(rr, fr, f, Math.floor(avail.get(rr) * 0.7));
   }
 }
 
@@ -873,6 +925,74 @@ function drawParts(c) {
   c.globalAlpha = 1;
 }
 
+/* Variantes : trou noir, tempête, vaisseau-mère */
+function drawHole(c, x, y, r, t) {
+  c.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < 5; k++) {
+    const a = t * (1.6 - k * 0.2) + k * 1.3, rr = r * (0.75 + k * 0.17);
+    c.strokeStyle = k % 2 ? 'rgba(255,150,80,.35)' : 'rgba(190,120,255,.3)'; c.lineWidth = r * 0.12;
+    c.beginPath(); c.ellipse(x, y, rr * 1.35, rr * 0.9, 0.35, a, a + 2.4); c.stroke();
+  }
+  c.globalCompositeOperation = 'source-over';
+  c.fillStyle = '#000'; c.beginPath(); c.arc(x, y, r * 0.55, 0, TAU); c.fill();
+  c.strokeStyle = 'rgba(255,215,170,.85)'; c.lineWidth = 1.4; c.stroke();
+  c.setLineDash([3, 6]); c.lineDashOffset = -t * 6; c.strokeStyle = 'rgba(255,90,90,.35)'; c.lineWidth = 1;
+  c.beginPath(); c.arc(x, y, r + 22, 0, TAU); c.stroke(); c.setLineDash([]);
+}
+function drawStorm(c, x, y, r, t) {
+  c.fillStyle = 'rgba(110,140,255,.07)'; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+  for (let k = 0; k < 7; k++) {
+    const a = -t * (0.25 + k * 0.05) + k * 0.9, rr = r * (0.25 + k * 0.1);
+    c.strokeStyle = 'rgba(150,180,255,.13)'; c.lineWidth = 3 + k;
+    c.beginPath(); c.arc(x, y, rr, a, a + 1.6); c.stroke();
+  }
+  const q = Math.floor(t * 4);
+  if (hrand(q * 7 + 1) > 0.8) {
+    let a = hrand(q) * TAU, px = x + Math.cos(a) * r * 0.2, py = y + Math.sin(a) * r * 0.2;
+    c.strokeStyle = 'rgba(220,235,255,.6)'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(px, py);
+    for (let j = 1; j < 6; j++) { a += (hrand(q + j * 13) - 0.5) * 1.2; px += Math.cos(a) * r * 0.13; py += Math.sin(a) * r * 0.13; c.lineTo(px, py); }
+    c.stroke();
+  }
+  c.globalCompositeOperation = 'source-over';
+  c.setLineDash([6, 8]); c.lineDashOffset = t * 8; c.strokeStyle = 'rgba(150,180,255,.3)'; c.lineWidth = 1.2;
+  c.beginPath(); c.arc(x, y, r, 0, TAU); c.stroke(); c.setLineDash([]);
+}
+function drawMods(c, t) {
+  if (G.storm) drawStorm(c, G.storm.x, G.storm.y, G.storm.r, t);
+  if (G.hole) drawHole(c, G.hole.x, G.hole.y, G.hole.r, t);
+  for (const n of G.nodes) if (n.type === 'mother' && n.owner > 0) {
+    c.setLineDash([4, 6]); c.lineDashOffset = -t * 5; c.strokeStyle = rgba(FAC[n.owner].col, 0.35); c.lineWidth = 1.3;
+    c.beginPath(); c.arc(n.x, n.y, T.mother.range, 0, TAU); c.stroke(); c.setLineDash([]);
+  }
+}
+function drawMother(c, n, t) {
+  const f = n.owner, F = FAC[f], r = n.r * (1 + n.pulse * 0.12);
+  c.globalCompositeOperation = 'lighter'; c.globalAlpha = 0.55 + n.flash * 0.25 + n.fight * 0.15;
+  c.drawImage(SPR.glow[f], n.x - r * 3, n.y - r * 3, r * 6, r * 6);
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  c.save(); c.translate(n.x, n.y);
+  c.lineWidth = r * 0.16; c.strokeStyle = METAL_D; c.beginPath(); c.arc(0, 0, r * 1.05, 0, TAU); c.stroke();
+  const spin = t * 0.3;
+  for (let k = 0; k < 8; k++) {
+    const a = spin + k * TAU / 8;
+    c.strokeStyle = k % 2 ? METAL_M : F.col; c.lineWidth = r * 0.1;
+    c.beginPath(); c.arc(0, 0, r * 1.05, a, a + 0.5); c.stroke();
+  }
+  let g = c.createLinearGradient(0, -r, 0, r); g.addColorStop(0, '#8a91b0'); g.addColorStop(1, '#262a40');
+  c.fillStyle = g; poly(c, 0, 0, r * 0.8, 6, -spin * 0.5); c.fill();
+  c.strokeStyle = rgba(F.light, 0.9); c.lineWidth = 1.6; c.stroke();
+  c.fillStyle = F.col; poly(c, 0, 0, r * 0.42, 6, spin); c.fill();
+  c.strokeStyle = 'rgba(255,255,255,.5)'; c.lineWidth = 1; c.stroke();
+  const ca = Math.cos(n.aim), sa = Math.sin(n.aim);
+  c.strokeStyle = '#e3e7f5'; c.lineWidth = r * 0.12; c.beginPath(); c.moveTo(ca * r * 0.3, sa * r * 0.3); c.lineTo(ca * r * 1.0, sa * r * 1.0); c.stroke();
+  c.fillStyle = F.light; c.beginPath(); c.arc(0, 0, r * 0.14, 0, TAU); c.fill();
+  c.restore();
+  if (f > 0 && n.cool > 1 / T.mother.rate - 0.1) {
+    c.globalCompositeOperation = 'lighter'; c.drawImage(SPR.dot[f], n.x + ca * r * 1.05 - 9, n.y + sa * r * 1.05 - 9, 18, 18); c.globalCompositeOperation = 'source-over';
+  }
+}
+
 function sendCount(n) { const m = n.ships[1]; return save.pct >= 1 ? m : Math.max(1, Math.floor(m * save.pct)); }
 
 function render() {
@@ -893,6 +1013,8 @@ function render() {
     c.setLineDash([3, 7]); c.lineDashOffset = t * 4; c.strokeStyle = rgba(FAC[n.owner].col, 0.2); c.lineWidth = 1.1; c.stroke(); c.setLineDash([]);
   }
 
+  drawMods(c, t);
+
   // geste en cours
   const g = G.gest;
   if (g && g.moved && g.sel.size) {
@@ -904,7 +1026,7 @@ function render() {
     if (g.hover) { c.strokeStyle = 'rgba(255,255,255,.85)'; c.lineWidth = 1.8; c.beginPath(); c.arc(g.hover.x, g.hover.y, g.hover.r + 16, 0, TAU); c.stroke(); }
   }
 
-  for (const n of N) drawBody(c, n, t);
+  for (const n of N) (n.type === 'mother' ? drawMother : drawBody)(c, n, t);
   c.lineCap = 'round';
   for (const n of N) drawArcs(c, n);
 
@@ -1069,9 +1191,13 @@ function intro(P) {
   if (P.extraEnemyHome) s += ' Il démarre avec deux bases.';
   if (P.extraPlayerHome) s += ' Tu démarres avec deux bases.';
   if (P.breather) s += ' Un niveau plus calme.';
+  if (P.boss) s += ` ${FNAME[2]} a un vaisseau-mère.`;
+  for (const m of P.mods) s += ' ' + MODS[m];
+  const ps = Object.keys(P.persona).map((f, i) => `${FNAME[f]} ${i ? '' : 'est '}${PERS[P.persona[f]].n[+f === 4 ? 1 : 0]}`);
+  if (ps.length) s += ' ' + ps.join(', ') + '.';
   $('introN').textContent = `Niveau ${P.L}`; $('introS').textContent = s;
   const el = $('intro'); el.classList.add('on');
-  clearTimeout(intro.tm); intro.tm = setTimeout(() => el.classList.remove('on'), 2600);
+  clearTimeout(intro.tm); intro.tm = setTimeout(() => el.classList.remove('on'), s.length > 50 ? 4000 : 2600);
 }
 
 const HINTS = {
@@ -1095,6 +1221,7 @@ function openCards(P, then) {
   cardQueue = [];
   for (const k of ['outpost', 'forge', 'relay', 'bastion']) if (P.types.includes(k) && !save.seen['v2' + k]) cardQueue.push(k);
   if (P.garrison && !save.seen.v2garrison) cardQueue.push('garrison');
+  for (const k of [...P.mods, P.boss && 'boss', P.L >= 11 && 'persona']) if (k && !save.seen['v2' + k]) cardQueue.push(k);
   openCards.then = then;
   nextCard();
 }
@@ -1102,10 +1229,10 @@ function nextCard() {
   const k = cardQueue.shift();
   if (!k) { G.cardOpen = false; G.paused = false; showScreen(null); if (openCards.then) openCards.then(); return; }
   G.cardOpen = true; G.paused = true;
-  const type = k === 'garrison' ? 'star' : k;
-  cardNode = { id: 97, type, x: 0, y: 0, r: T[type].r, owner: k === 'garrison' ? 0 : 1, ships: [0, 0, 0, 0, 0], hp: 1, capP: 0, pulse: 0, flash: 0, fight: 0, rot: 0.6, aim: -0.8, cool: 0, moon: true, key: k };
+  const C = CARDS[k], type = C.type || (k === 'garrison' ? 'star' : k);
+  cardNode = { id: 97, type, x: 0, y: 0, r: T[type].r, owner: C.owner || (k === 'garrison' ? 0 : 1), ships: [0, 0, 0, 0, 0], hp: 1, capP: 0, pulse: 0, flash: 0, fight: 0, rot: 0.6, aim: -0.8, cool: 0, moon: true, key: k };
   if (type === 'star') cardNode.tex = makePlanet(4242);
-  if (k === 'garrison') cardNode.ships[0] = 9; else cardNode.ships[1] = 10;
+  if (k === 'garrison') cardNode.ships[0] = 9; else cardNode.ships[cardNode.owner] = 10;
   $('cardT').textContent = CARDS[k].t; $('cardS').textContent = CARDS[k].s;
   showScreen('card'); $('cardOk').focus();
 }
@@ -1115,7 +1242,8 @@ function renderCard(t) {
   const c = $('cardCv').getContext('2d'), s = 58 / (cardNode.r + 28);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, 264, 264);
   c.setTransform(2 * s, 0, 0, 2 * s, 132, 132);
-  drawBody(c, cardNode, t);
+  if (CARDS[cardNode.key].draw) { CARDS[cardNode.key].draw(c, t); return; }
+  (cardNode.type === 'mother' ? drawMother : drawBody)(c, cardNode, t);
   drawOrbits(c, cardNode, t, { k: 2 * s, ox: 132, oy: 132 });
 }
 
