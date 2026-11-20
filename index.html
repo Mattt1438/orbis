@@ -72,6 +72,10 @@ button:focus-visible{outline:2px solid var(--you);outline-offset:3px}
 #btnSpeed{width:auto;padding:0 12px;font:700 14px Manrope,sans-serif;font-variant-numeric:tabular-nums}
 #power{grid-column:1/-1;height:4px;border-radius:4px;overflow:hidden;display:flex;background:rgba(255,255,255,.06);margin-top:4px;gap:2px}
 #power i{display:block;height:100%;flex-basis:0;transition:flex-grow .6s ease;border-radius:2px}
+#goalsHud{grid-column:1/-1;display:flex;justify-content:center;gap:14px;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink);margin-top:2px}
+#goalsHud span b{color:#ffc24a;font-weight:400;margin-right:4px}
+#goalsHud span.miss{color:var(--ink-dim);text-decoration:line-through;text-decoration-color:rgba(255,138,128,.7)}
+#goalsHud span.miss b{color:rgba(255,255,255,.28)}
 
 #dock{position:absolute;left:0;right:0;bottom:0;padding:0 12px 12px;display:flex;justify-content:center;pointer-events:none}
 .seg{pointer-events:auto;display:flex;gap:2px;padding:4px;border-radius:999px;background:var(--glass);border:1px solid var(--edge);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
@@ -84,7 +88,8 @@ button:focus-visible{outline:2px solid var(--you);outline-offset:3px}
 #intro{position:absolute;left:0;right:0;top:30%;text-align:center;pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity .7s ease,transform .7s ease;padding:0 24px}
 #intro.on{opacity:1;transform:none}
 #introN{font-family:Unbounded,Manrope,sans-serif;font-weight:700;font-size:46px;letter-spacing:-.01em;text-shadow:0 0 30px rgba(127,224,255,.35)}
-#introS{margin-top:10px;color:var(--ink-dim);font-size:15px;line-height:1.45}
+#introS{display:inline-block;max-width:340px;margin-top:10px;padding:8px 14px;border-radius:14px;background:rgba(11,8,32,.72);color:var(--ink);font-size:14.5px;line-height:1.45}
+#introS:empty{display:none}
 
 /* Screens */
 .screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;background:radial-gradient(120% 80% at 50% 45%,rgba(11,8,32,.25),rgba(11,8,32,.82))}
@@ -137,6 +142,7 @@ button:focus-visible{outline:2px solid var(--you);outline-offset:3px}
     <button class="icon-btn" id="btnSpeed" aria-label="Vitesse du jeu">×1</button>
   </div>
   <div id="power" aria-hidden="true"></div>
+  <div id="goalsHud"><span id="gTime"></span><span id="gSafe"></span></div>
 </div>
 
 <div id="dock" hidden>

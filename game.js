@@ -1219,6 +1219,13 @@ function updateHud() {
   pop.innerHTML = `<b>${G.tot[1]}</b> / ${G.cap[1]}${full ? '<i>max</i>' : ''}`;
   pop.classList.toggle('full', full);
   $('power').querySelectorAll('i').forEach(i => { i.style.flexGrow = String(Math.max(0.0001, G.tot[+i.dataset.f])); });
+  // Objectifs en direct : chrono contre le temps de référence, et aucune planète perdue.
+  const P = G.P, clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const goal = (el, ok, txt) => { el.className = ok ? '' : 'miss'; el.innerHTML = `<b aria-hidden="true">${ok ? '★' : '☆'}</b>${txt}`; };
+  if (P.daily) goal($('gTime'), true, clock(G.t));
+  else goal($('gTime'), G.t <= parTime(P), `${clock(G.t)} / ${clock(parTime(P))}`);
+  $('gSafe').hidden = !!P.daily;
+  goal($('gSafe'), !G.lost, 'Aucune planète perdue');
 }
 
 function intro(P) {
