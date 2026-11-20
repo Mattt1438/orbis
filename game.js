@@ -245,6 +245,7 @@ function buildSprites() {
   c = mkCanvas(16, 16); x = c.getContext('2d'); g = x.createRadialGradient(8, 8, 0, 8, 8, 8);
   g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.3, 'rgba(220,225,255,.45)'); g.addColorStop(1, 'rgba(200,210,255,0)');
   x.fillStyle = g; x.fillRect(0, 0, 16, 16); SPR.star = c;
+  SPR.mother = FAC.map(makeMother);
 }
 
 /* ---------- Écran ---------- */
@@ -1166,30 +1167,109 @@ function drawMods(c, t) {
     c.beginPath(); c.arc(n.x, n.y, T.mother.range, 0, TAU); c.stroke(); c.setLineDash([]);
   }
 }
-function drawMother(c, n, t) {
-  const f = n.owner, F = FAC[f], r = n.r * (1 + n.pulse * 0.12);
-  c.globalCompositeOperation = 'lighter'; c.globalAlpha = 0.55 + n.flash * 0.25 + n.fight * 0.15;
-  c.drawImage(SPR.glow[f], n.x - r * 3, n.y - r * 3, r * 6, r * 6);
-  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
-  c.save(); c.translate(n.x, n.y);
-  c.lineWidth = r * 0.16; c.strokeStyle = METAL_D; c.beginPath(); c.arc(0, 0, r * 1.05, 0, TAU); c.stroke();
-  const spin = t * 0.3;
-  for (let k = 0; k < 8; k++) {
-    const a = spin + k * TAU / 8;
-    c.strokeStyle = k % 2 ? METAL_M : F.col; c.lineWidth = r * 0.1;
-    c.beginPath(); c.arc(0, 0, r * 1.05, a, a + 0.5); c.stroke();
+// Coque du vaisseau-mère, pré-rendue par faction : proue en haut, rayon = 120 px, centre (192,192).
+// La lumière y est figée (haut gauche) ; tourelle, réacteurs et feux sont dessinés à chaque image.
+function makeMother(F, f) {
+  const c = mkCanvas(384, 384), x = c.getContext('2d'), P = s => new Path2D(s);
+  x.translate(192, 192); x.scale(120, 120); x.lineJoin = 'round'; x.lineCap = 'round';
+  const ink = (p, w = 0.1) => { x.strokeStyle = rgba(INK, 0.9); x.lineWidth = w; x.stroke(p); };
+  const steel = metal(x, 1.15, 0), paint = metal(x, 1.15, 0, f ? mix(F.col, '#ffffff', 0.35) : '#a9adc2', f ? F.col : '#6d7088', f ? F.dark : '#34364c');
+  const line = (p, col, w) => { x.strokeStyle = col; x.lineWidth = w; x.stroke(p); };
+  // ailes : relient la coque aux nacelles, pour une silhouette d'un seul bloc
+  const wings = P('M.3 -.12 L.66 .04 L.66 .8 L.3 .72 Z M-.3 -.12 L-.66 .04 L-.66 .8 L-.3 .72 Z');
+  ink(wings); x.fillStyle = metal(x, 1.15, 0, '#9299b8', '#5d6384', '#2b2e45'); x.fill(wings);
+  line(P('M.3 .22 L.66 .3 M.3 .5 L.66 .56 M-.3 .22 L-.66 .3 M-.3 .5 L-.66 .56'), rgba(INK, 0.55), 0.03);
+  // nacelles : hangars latéraux, bande à la couleur de la faction
+  for (const s of [-1, 1]) {
+    x.save(); x.translate(s * 0.78, 0);
+    const pod = P('M0 -.46 L.15 -.2 L.15 .82 L.07 .96 L-.07 .96 L-.15 .82 L-.15 -.2 Z');
+    ink(pod); x.fillStyle = steel; x.fill(pod);
+    x.fillStyle = paint; x.fill(P('M0 -.46 L.15 -.2 L.15 0 L-.15 0 L-.15 -.2 Z')); x.fillRect(-0.15, 0.56, 0.3, 0.14);
+    x.fillStyle = rgba(INK, 0.3); x.fill(P('M0 -.46 L.15 -.2 L.15 .82 L.07 .96 L0 .96 Z'));
+    line(P('M-.15 0 L.15 0 M-.15 .56 L.15 .56 M-.15 .7 L.15 .7'), rgba(INK, 0.6), 0.025);
+    x.fillStyle = rgba(INK, 0.85); x.fillRect(-0.08, 0.1, 0.16, 0.38);  // baie du hangar
+    x.fillStyle = f ? F.light : '#8d91a8'; for (let k = 0; k < 3; k++) x.fillRect(-0.045, 0.15 + k * 0.11, 0.09, 0.05);
+    line(P('M-.02 -.4 L-.13 -.2 L-.13 .8'), 'rgba(255,255,255,.65)', 0.022);
+    x.restore();
   }
-  let g = c.createLinearGradient(0, -r, 0, r); g.addColorStop(0, '#8a91b0'); g.addColorStop(1, '#262a40');
-  c.fillStyle = g; poly(c, 0, 0, r * 0.8, 6, -spin * 0.5); c.fill();
-  c.strokeStyle = rgba(F.light, 0.9); c.lineWidth = 1.6; c.stroke();
-  c.fillStyle = F.col; poly(c, 0, 0, r * 0.42, 6, spin); c.fill();
-  c.strokeStyle = 'rgba(255,255,255,.5)'; c.lineWidth = 1; c.stroke();
-  const ca = Math.cos(n.aim), sa = Math.sin(n.aim);
-  c.strokeStyle = '#e3e7f5'; c.lineWidth = r * 0.12; c.beginPath(); c.moveTo(ca * r * 0.3, sa * r * 0.3); c.lineTo(ca * r * 1.0, sa * r * 1.0); c.stroke();
-  c.fillStyle = F.light; c.beginPath(); c.arc(0, 0, r * 0.14, 0, TAU); c.fill();
-  c.restore();
-  if (f > 0 && n.cool > 1 / T.mother.rate - 0.1) {
-    c.globalCompositeOperation = 'lighter'; c.drawImage(SPR.dot[f], n.x + ca * r * 1.05 - 9, n.y + sa * r * 1.05 - 9, 18, 18); c.globalCompositeOperation = 'source-over';
+  // bloc réacteurs
+  x.fillStyle = rgba(INK, 0.9); x.fillRect(-0.4, 0.9, 0.8, 0.2);
+  x.fillStyle = METAL_D; x.fillRect(-0.35, 0.92, 0.7, 0.14);
+  for (const k of [-1, 0, 1]) {
+    x.fillStyle = rgba(INK, 0.9); x.beginPath(); x.ellipse(k * 0.23, 1.06, 0.1, 0.055, 0, 0, TAU); x.fill();
+    x.fillStyle = f ? F.light : '#5a5e78'; x.beginPath(); x.ellipse(k * 0.23, 1.06, 0.065, 0.03, 0, 0, TAU); x.fill();
+  }
+  // coque : arête centrale (flanc droit dans l'ombre), blindage peint sur la proue et les flancs
+  const hull = P('M0 -1.24 L.26 -.78 L.34 -.3 L.57 .1 L.57 .62 L.4 .98 L-.4 .98 L-.57 .62 L-.57 .1 L-.34 -.3 L-.26 -.78 Z');
+  ink(hull, 0.11); x.fillStyle = steel; x.fill(hull);
+  x.fillStyle = paint;
+  x.fill(P('M0 -1.24 L.26 -.78 L.3 -.52 L0 -.8 L-.3 -.52 L-.26 -.78 Z'));
+  x.fill(P('M.34 -.3 L.57 .1 L.57 .62 L.44 .62 L.44 .16 L.27 -.14 Z')); x.fill(P('M-.34 -.3 L-.57 .1 L-.57 .62 L-.44 .62 L-.44 .16 L-.27 -.14 Z'));
+  x.fill(P('M-.22 .8 L.22 .8 L.3 .98 L-.3 .98 Z'));
+  x.fillStyle = rgba(INK, 0.32); x.fill(P('M0 -1.24 L.26 -.78 L.34 -.3 L.57 .1 L.57 .62 L.4 .98 L0 .98 Z'));
+  x.fillStyle = rgba(INK, 0.22); x.fill(P('M-.57 .62 L.57 .62 L.4 .98 L-.4 .98 Z'));
+  line(P('M0 -.8 L.3 -.52 M0 -.8 L-.3 -.52 M.27 -.14 L.44 .16 L.44 .62 M-.27 -.14 L-.44 .16 L-.44 .62 M-.57 .62 L.57 .62 M-.3 -.36 L.3 -.36 M-.22 .8 L.22 .8'), rgba(INK, 0.6), 0.025);
+  line(P('M-.02 -1.18 L-.25 -.78 L-.33 -.3 L-.55 .1 L-.55 .6'), 'rgba(255,255,255,.75)', 0.025);
+  // passerelle : verrière éclairée sur l'arête
+  const br = P('M0 -.74 L0 -.44'); ink(br, 0.13); line(br, f ? F.light : '#8d91a8', 0.06); line(P('M-.012 -.72 L-.012 -.6'), '#ffffff', 0.025);
+  // puits de la tourelle
+  x.fillStyle = rgba(INK, 0.9); x.beginPath(); x.arc(0, 0, 0.44, 0, TAU); x.fill();
+  x.fillStyle = metal(x, 0.4, 0, '#4d5373', '#30344c', '#191b2c'); x.beginPath(); x.arc(0, 0, 0.39, 0, TAU); x.fill();
+  x.strokeStyle = rgba(f ? F.col : '#6d7088', 0.9); x.lineWidth = 0.035; x.beginPath(); x.arc(0, 0, 0.39, 0, TAU); x.stroke();
+  return c;
+}
+function drawMother(c, n, t) {
+  const f = n.owner, F = FAC[f], r = n.r * (1 + n.pulse * 0.12), x = n.x, y = n.y, q = r * 1.6, spr = SPR.mother[f];
+  c.globalCompositeOperation = 'lighter';
+  c.globalAlpha = (f ? 0.55 : 0.18) + n.flash * 0.25 + n.fight * 0.15;
+  c.drawImage(SPR.glow[f], x - r * 3, y - r * 3, r * 6, r * 6);
+  if (f) {  // panaches des réacteurs
+    c.globalAlpha = 0.9;
+    for (const k of [-1, 0, 1]) {
+      const h = r * (0.4 + (REDUCED ? 0 : 0.06 * Math.sin(t * 9 + k * 2 + n.id)));
+      c.drawImage(SPR.dot[f], x + k * r * 0.23 - r * 0.16, y + r * 1.06 - h * 0.42, r * 0.32, h);
+    }
+  }
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  c.drawImage(spr, x - q, y - q, q * 2, q * 2);
+  c.globalCompositeOperation = 'lighter';
+  const hot = Math.min(REDUCED ? 0.2 : 0.6, n.flash * 0.5 + n.fight * 0.15);  // la coque s'embrase à la capture et au combat
+  if (hot > 0.01) { c.globalAlpha = hot; c.drawImage(spr, x - q, y - q, q * 2, q * 2); }
+  if (f) {  // feux de position : proue et nacelles
+    const s = r * 0.2;
+    c.globalAlpha = REDUCED ? 0.6 : 0.5 + 0.5 * Math.sin(t * 3.2 + n.id);
+    for (const [dx, dy] of [[0, -1.24], [-0.78, -0.46], [0.78, -0.46]]) c.drawImage(SPR.dot[f], x + dx * r - s, y + dy * r - s, s * 2, s * 2);
+  }
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+
+  // tourelle : canon principal à deux rails, orienté selon n.aim
+  const rate = T.mother.rate, ca = Math.cos(n.aim), sa = Math.sin(n.aim);
+  const len = r * (1 - (f > 0 ? clamp((n.cool - 1 / rate + 0.16) / 0.16, 0, 1) * 0.14 : 0));  // recul au tir
+  c.save(); c.translate(x, y); c.rotate(n.aim); c.lineCap = 'butt'; c.lineJoin = 'round';
+  if (f) {  // couronne d'énergie du puits
+    c.setLineDash([r * 0.13, r * 0.1]); c.lineDashOffset = -t * r * 0.25; c.strokeStyle = F.col; c.lineWidth = r * 0.05;
+    c.beginPath(); c.arc(0, 0, r * 0.31, 0, TAU); c.stroke(); c.setLineDash([]);
+  }
+  const mg = metal(c, r, n.aim);
+  const rails = (col, w, a, b) => { c.strokeStyle = col; c.lineWidth = r * w; c.beginPath(); for (const o of [-1, 1]) { c.moveTo(a, o * r * 0.09); c.lineTo(b, o * r * 0.09); } c.stroke(); };
+  rails(rgba(INK, 0.9), 0.14, 0, len); rails(mg, 0.075, 0, len);
+  rails(rgba(INK, 0.9), 0.17, len - r * 0.2, len - r * 0.04); rails(METAL_L, 0.1, len - r * 0.18, len - r * 0.06);  // frein de bouche
+  const charge = f > 0 ? (REDUCED ? 0.7 : clamp(1 - n.cool * rate, 0, 1)) : 0;  // l'âme du canon se recharge entre deux tirs
+  c.strokeStyle = rgba(f ? F.light : '#6d7088', 0.3 + charge * 0.7); c.lineWidth = r * 0.05;
+  c.beginPath(); c.moveTo(r * 0.2, 0); c.lineTo(len - r * 0.2, 0); c.stroke();
+  c.fillStyle = rgba(INK, 0.9); poly(c, 0, 0, r * 0.3, 6, 0); c.fill();
+  c.fillStyle = mg; poly(c, 0, 0, r * 0.25, 6, 0); c.fill();
+  c.strokeStyle = rgba(INK, 0.5); c.lineWidth = r * 0.025; c.beginPath(); c.moveTo(-r * 0.25, 0); c.lineTo(-r * 0.12, 0); c.stroke();
+  const hx = Math.cos(LA - n.aim) * r * 0.06, hy = Math.sin(LA - n.aim) * r * 0.06;
+  const g = c.createRadialGradient(hx, hy, 0, 0, 0, r * 0.15); g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, F.light); g.addColorStop(1, f ? F.col : '#4a4d66');
+  c.fillStyle = rgba(INK, 0.9); c.beginPath(); c.arc(0, 0, r * 0.18, 0, TAU); c.fill();
+  c.fillStyle = g; c.beginPath(); c.arc(0, 0, r * 0.14, 0, TAU); c.fill();
+  c.restore(); c.lineCap = 'round';
+  if (f > 0 && n.cool > 1 / rate - 0.1) {
+    const s = r * 0.5;
+    c.globalCompositeOperation = 'lighter';
+    c.drawImage(SPR.dot[f], x + ca * r * 1.05 - s, y + sa * r * 1.05 - s, s * 2, s * 2);
+    c.globalCompositeOperation = 'source-over';
   }
 }
 
