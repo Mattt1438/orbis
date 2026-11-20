@@ -49,6 +49,8 @@ const PERS = {
 // Tirages séparés de makeParams pour ne décaler aucune carte existante.
 function addVariants(P) {
   P.mods = []; P.persona = {};
+  // Deux bases suffisent comme avantage : pas de bonus de production, moins de vaisseaux au départ.
+  if (P.extraEnemyHome) { P.enemyProd = 1; P.enemyStart = Math.round(P.enemyStart * 0.7); }
   if (P.L < 11) return P;
   const r = mulberry32(hash(P.L * 31337 + 5));
   const x = r();
@@ -337,7 +339,7 @@ function buildBg(seed) {
 function makeParams(L) {
   const r = mulberry32(hash(L * 7919 + 13));
   const t = 1 - 1 / (1 + (L - 1) / 9);
-  const boss = L >= 20 && L % 10 === 0;
+  const boss = L >= 10 && L % 10 === 0;
   const breather = L > 4 && L % 5 === 0 && !boss;
   const d = breather ? t * 0.55 : boss ? t * 0.8 : t;
   let enemies = 1;
@@ -364,9 +366,10 @@ function makeParams(L) {
     maxMoves: d < 0.3 ? 1 : d < 0.6 ? 2 : 3,
     noise: lerp(0.65, 0.15, d),
     playerStart: 30,
-    enemyStart: Math.round(lerp(10, 44, d)),
-    enemyProd: 1 + 0.35 * d * (enemies === 1 ? 1 : 0.55),
-    extraEnemyHome: L >= 9 && enemies === 1 && r() < 0.3 + d * 0.3,
+    // 1 contre 1 : l'ennemi n'a personne d'autre à combattre, ses bonus sont plus faibles (sinon mur dès le niveau 9).
+    enemyStart: Math.round(lerp(10, enemies === 1 ? 34 : 44, d)),
+    enemyProd: 1 + d * (enemies === 1 ? 0.1 : 0.19),
+    extraEnemyHome: L >= 9 && enemies === 1 && r() < 0.1 + d * 0.15 && !breather && L >= 12,
     extraPlayerHome: enemies >= 3 || (enemies === 2 && r() < 0.5),
   });
 }
@@ -529,8 +532,10 @@ function update(dt) {
   // production
   for (const n of N) {
     const o = n.owner;
-    if (o > 0 && n.hp >= 1 && tot[o] < cap[o]) {
-      n.acc += dt * T[n.type].prod * (G.demo || o === 1 ? 1 : P.enemyProd) * (P.rich && !n.fight ? 1.6 : 1);
+    // Une planète en plein combat ne produit pas : sinon une forte production (chantier, bonus ennemi)
+    // compense l'usure d'un défenseur seul et la planète devient imprenable.
+    if (o > 0 && n.hp >= 1 && !n.fight && tot[o] < cap[o]) {
+      n.acc += dt * T[n.type].prod * (G.demo || o === 1 ? 1 : P.enemyProd) * (P.rich ? 1.6 : 1);
       while (n.acc >= 1) { n.acc -= 1; n.ships[o]++; tot[o]++; }
     }
   }
