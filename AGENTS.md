@@ -59,7 +59,8 @@ Ouvrir http://localhost:8765 et vérifier :
 ## Conventions du jeu
 
 - Interface en français. On tutoie le joueur, avec un ton bref et direct.
-- La sauvegarde est dans `localStorage`, clé `orbis.v1` (`level`, `best`, `pct`, `muted`, `speed`, `seen`).
+- La sauvegarde est dans `localStorage`, clé `orbis.v1` (`level`, `best`, `pct`, `muted`, `speed`, `seen`, `stars`, `times`, `daily`, `fail`).
+  `stars`/`times` : meilleures étoiles et meilleur temps par niveau. `daily` : `{ d: AAAAMMJJ, t }` du défi du jour réussi. `fail` : `{ L, n }` défaites d'affilée (3 → « Passer au niveau suivant »).
   Ne pas casser ce format : un joueur perdrait sa progression. S'il doit changer, migrer les anciennes données au chargement.
 - Les cartes de didacticiel sont marquées vues via `save.seen['v2' + clé]`. Changer le préfixe les réaffiche à tout le monde.
 - Les niveaux sont déterministes (seed dérivé du numéro de niveau). Modifier `makeParams` ou `genLevel` change toutes les cartes.

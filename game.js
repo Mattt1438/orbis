@@ -20,7 +20,7 @@ const FX = REDUCED ? 0.4 : 1;
 
 /* ---------- Factions et installations ---------- */
 const FAC = [
-  { col: '#8c93b8' },  // neutre
+  { col: '#7f7f8a' },  // neutre (gris plus sombre et moins bleu : se distingue mieux du cyan)
   { col: '#7fe0ff' },  // toi
   { col: '#ff6a5c' },  // corail
   { col: '#ffc24a' },  // or
@@ -48,14 +48,15 @@ const CARDS = {
 /* ---------- Sauvegarde ---------- */
 const SAVE_KEY = 'orbis.v1';
 function load() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch (e) { return {}; } }
-const save = Object.assign({ level: 1, best: 1, pct: 0.5, muted: false, speed: 1, seen: {} }, load());
+// stars/times : meilleur résultat par niveau ; daily : défi du jour réussi ; fail : défaites d'affilée au même niveau.
+const save = Object.assign({ level: 1, best: 1, pct: 0.5, muted: false, speed: 1, seen: {}, stars: {}, times: {}, daily: null, fail: null }, load());
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
 
 /* ---------- Son (synthétisé) ---------- */
 const Snd = {
   ac: null, out: null, nb: null, last: {},
   ensure() {
-    if (this.ac) { if (this.ac.state === 'suspended') this.ac.resume(); return; }
+    if (this.ac) { this.wake(); return; }
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
       this.ac = new AC();
@@ -63,9 +64,17 @@ const Snd = {
       const comp = this.ac.createDynamicsCompressor();
       this.out.connect(comp); comp.connect(this.ac.destination);
       this.ambient();
+      if (save.muted) this.ac.suspend();
     } catch (e) { this.ac = null; }
   },
-  setMuted(m) { save.muted = m; persist(); if (this.out) this.out.gain.setTargetAtTime(m ? 0 : 0.55, this.ac.currentTime, 0.05); },
+  // Contexte suspendu quand le son est coupé ou l'app cachée : le fond sonore ne tourne pas pour rien.
+  wake() { if (this.ac && this.ac.state === 'suspended' && !save.muted && !document.hidden) this.ac.resume(); },
+  sleep() { if (this.ac && this.ac.state === 'running') this.ac.suspend(); },
+  setMuted(m) {
+    save.muted = m; persist(); if (!this.out) return;
+    this.out.gain.setTargetAtTime(m ? 0 : 0.55, this.ac.currentTime, 0.05);
+    clearTimeout(this.tm); if (m) this.tm = setTimeout(() => this.sleep(), 300); else this.wake();
+  },
   ok(k, ms) { const n = performance.now(); if (this.last[k] && n - this.last[k] < ms) return false; this.last[k] = n; return true; },
   tone(f, d, o = {}) {
     if (!this.ac || save.muted) return;
@@ -180,6 +189,7 @@ function resize() {
   cv.width = Math.round(view.w * dpr); cv.height = Math.round(view.h * dpr);
   layout();
   buildBg(G.P ? G.P.seed : 1);
+  render();
 }
 
 function buildBg(seed) {
@@ -346,7 +356,7 @@ function genLevel(P, aspect) {
 
 function buildWorld(P, demo) {
   G.P = P; G.demo = demo; G.t = 0; G.ships = []; G.parts = []; G.over = false; G.sel = new Set(); G.gest = null;
-  G.checkT = 0; G.hudT = 0; G.sent = 0;
+  G.checkT = 0; G.hudT = 0; G.sent = 0; G.lost = false;
   G.facs = []; for (let f = 1; f <= P.enemies + 1; f++) G.facs.push(f);
   G.ai = {}; for (const f of G.facs) if (f !== 1 || demo) G.ai[f] = { t: P.aiDelay * (0.8 + Math.random() * 0.4) };
   const a = playArea();
@@ -390,6 +400,7 @@ function onCaptured(n, f) {
   if (!G.demo && f === 1) { Snd.capture(); vib(12); }
 }
 function onNeutralized(n, prev) {
+  if (prev === 1) G.lost = true;
   ring(n.x, n.y, prev, n.r * 1.1, n.r * 2.4, 0.6);
   if (!G.demo && prev === 1) { Snd.lost(); vib([20, 40, 20]); }
 }
@@ -873,6 +884,17 @@ function drawParts(c) {
   c.globalAlpha = 1;
 }
 
+// Symbole par camp, à côté des nombres : le camp se lit sans dépendre de la couleur (daltonisme).
+function glyph(c, f, x, y, s) {
+  c.beginPath();
+  if (f === 1) c.arc(x, y, s * 0.5, 0, TAU);
+  else if (f === 2) { c.moveTo(x, y - s * 0.6); c.lineTo(x + s * 0.58, y + s * 0.42); c.lineTo(x - s * 0.58, y + s * 0.42); c.closePath(); }
+  else if (f === 3) c.rect(x - s * 0.42, y - s * 0.42, s * 0.84, s * 0.84);
+  else { c.moveTo(x, y - s * 0.62); c.lineTo(x + s * 0.5, y); c.lineTo(x, y + s * 0.62); c.lineTo(x - s * 0.5, y); c.closePath(); }
+  c.lineWidth = 3; c.strokeStyle = 'rgba(8,5,26,.85)'; c.stroke(); c.fill();
+}
+const GW = 7, GG = 3;  // taille du symbole, écart avec le nombre
+
 function sendCount(n) { const m = n.ships[1]; return save.pct >= 1 ? m : Math.max(1, Math.floor(m * save.pct)); }
 
 function render() {
@@ -929,22 +951,28 @@ function render() {
     if (!fs.length) continue;
     const sx = V.ox + n.x * V.sc, sy = V.oy + n.y * V.sc + n.r * V.sc + Math.max(14, 15 * V.sc);
     c.font = '700 12.5px Manrope, system-ui, sans-serif';
-    const ws = fs.map(f => c.measureText(String(n.ships[f])).width), gap = 9;
+    const ws = fs.map(f => c.measureText(String(n.ships[f])).width + (f ? GW + GG : 0)), gap = 9;
     let x = sx - (ws.reduce((a, b) => a + b, 0) + gap * (fs.length - 1)) / 2;
     fs.forEach((f, i) => {
-      const s = String(n.ships[f]), cx = x + ws[i] / 2;
+      const s = String(n.ships[f]), col = f === 0 ? '#c3c8dd' : FAC[f].light;
+      c.fillStyle = col;
+      if (f) glyph(c, f, x + GW / 2, sy, GW);
+      const cx = x + (f ? GW + GG : 0) + (ws[i] - (f ? GW + GG : 0)) / 2;
       c.strokeStyle = 'rgba(8,5,26,.85)'; c.lineWidth = 3.5; c.strokeText(s, cx, sy);
-      c.fillStyle = f === 0 ? '#c3c8dd' : FAC[f].light; c.fillText(s, cx, sy);
+      c.fillStyle = col; c.fillText(s, cx, sy);
       x += ws[i] + gap;
     });
   }
   if (g && g.moved && g.sel.size && g.hover) {
     let total = 0; for (const s of g.sel) if (s !== g.hover) total += sendCount(s);
     if (total > 0) {
-      c.font = '700 14px Manrope, system-ui, sans-serif';
-      const lbl = `${total}`, sx = V.ox + g.hover.x * V.sc, sy = V.oy + (g.hover.y - g.hover.r - 18) * V.sc - 14;
-      c.strokeStyle = 'rgba(8,5,26,.9)'; c.lineWidth = 4; c.strokeText(lbl, sx, sy);
-      c.fillStyle = '#ffffff'; c.fillText(lbl, sx, sy);
+      // Aperçu : vaisseaux envoyés → défenseurs sur place. Vert si ça suffit, rouge sinon.
+      const h = g.hover; let def = 0; for (let f = 0; f < 5; f++) if (f !== 1) def += h.ships[f];
+      const lbl = def ? `${total} → ${def}` : `${total}`;
+      c.font = '700 15px Manrope, system-ui, sans-serif';
+      const sx = V.ox + h.x * V.sc, sy = V.oy + (h.y - h.r - 18) * V.sc - 14;
+      c.strokeStyle = 'rgba(8,5,26,.92)'; c.lineWidth = 4.5; c.strokeText(lbl, sx, sy);
+      c.fillStyle = !def ? '#ffffff' : total > def ? '#8dffb0' : '#ff8a80'; c.fillText(lbl, sx, sy);
     }
   }
 }
@@ -1032,24 +1060,30 @@ function refreshMenu() {
   menuL = clamp(save.level, 1, save.best);
   updMenu();
 }
+const starStr = n => '★'.repeat(n) + '☆'.repeat(3 - n);
 function updMenu() {
   $('play').textContent = save.best === 1 ? 'Commencer' : `Jouer le niveau ${menuL}`;
   $('stepper').hidden = save.best <= 1;
-  $('lvSel').textContent = `Niveau ${menuL}`;
+  const st = save.stars[menuL];
+  $('lvSel').innerHTML = `Niveau ${menuL}` + (st ? ` <span class="stars" aria-label="${st} étoile${st > 1 ? 's' : ''} sur 3">${starStr(st)}</span>` : '');
   $('lvPrev').disabled = menuL <= 1; $('lvNext').disabled = menuL >= save.best;
+  const done = save.daily && save.daily.d === today();
+  $('daily').hidden = save.best < 6;
+  $('daily').innerHTML = done ? `Défi du jour <span class="daily-done">✓ ${fmtTime(save.daily.t)}</span>` : 'Défi du jour';
 }
 $('lvPrev').addEventListener('click', () => { menuL = Math.max(1, menuL - 1); updMenu(); });
 $('lvNext').addEventListener('click', () => { menuL = Math.min(save.best, menuL + 1); updMenu(); });
 $('play').addEventListener('click', () => startLevel(menuL));
+$('daily').addEventListener('click', startDaily);
 
-function pause() { if (G.mode !== 'play' || G.over || G.cardOpen) return; G.paused = true; G.gest = null; $('pauseS').textContent = `Niveau ${G.P.L}`; showScreen('pause'); }
+function pause() { if (G.mode !== 'play' || G.over || G.cardOpen) return; G.paused = true; G.gest = null; $('pauseS').textContent = levelName(G.P); showScreen('pause'); }
 function resume() { G.paused = false; showScreen(null); }
 $('btnPause').addEventListener('click', pause);
 $('pResume').addEventListener('click', resume);
-$('pRestart').addEventListener('click', () => startLevel(G.P.L));
+$('pRestart').addEventListener('click', restart);
 $('pMenu').addEventListener('click', toMenu);
 $('endMenu').addEventListener('click', toMenu);
-document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { pause(); Snd.sleep(); } else Snd.wake(); });
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape' || e.key === ' ') { if (G.mode === 'play' && !G.over) { e.preventDefault(); G.paused ? resume() : pause(); } }
 });
@@ -1059,7 +1093,9 @@ function setupPower() {
   for (const f of G.facs) { const i = document.createElement('i'); i.style.background = FAC[f].col; i.dataset.f = f; el.appendChild(i); }
 }
 function updateHud() {
-  $('pop').innerHTML = `<b>${G.tot[1]}</b> / ${G.cap[1]}`;
+  const full = G.tot[1] >= G.cap[1] && G.cap[1] > 0, pop = $('pop');
+  pop.innerHTML = `<b>${G.tot[1]}</b> / ${G.cap[1]}${full ? '<i>max</i>' : ''}`;
+  pop.classList.toggle('full', full);
   $('power').querySelectorAll('i').forEach(i => { i.style.flexGrow = String(Math.max(0.0001, G.tot[+i.dataset.f])); });
 }
 
@@ -1069,7 +1105,8 @@ function intro(P) {
   if (P.extraEnemyHome) s += ' Il démarre avec deux bases.';
   if (P.extraPlayerHome) s += ' Tu démarres avec deux bases.';
   if (P.breather) s += ' Un niveau plus calme.';
-  $('introN').textContent = `Niveau ${P.L}`; $('introS').textContent = s;
+  if (P.daily) s = 'Même carte pour tout le monde aujourd’hui. ' + s;
+  $('introN').textContent = levelName(P); $('introS').textContent = s;
   const el = $('intro'); el.classList.add('on');
   clearTimeout(intro.tm); intro.tm = setTimeout(() => el.classList.remove('on'), 2600);
 }
@@ -1080,14 +1117,20 @@ const HINTS = {
 };
 function setHint(txt) { const h = $('hint'); h.textContent = txt || ''; h.classList.toggle('on', !!txt); }
 function startHints(L) {
-  G.hints = save.seen['hint' + L] ? null : HINTS[L] || null; G.hintStep = 0;
+  G.hints = save.seen['hint' + L] ? null : HINTS[L] || null; G.hintStep = 0; G.hintL = L;
   setHint(G.hints ? G.hints[0] : '');
 }
 function advanceHint() {
   if (!G.hints) return;
   G.hintStep++;
-  if (G.hintStep < G.hints.length) { setHint(G.hints[G.hintStep]); clearTimeout(advanceHint.tm); advanceHint.tm = setTimeout(() => { if (G.hints) { save.seen['hint' + G.P.L] = 1; persist(); G.hints = null; setHint(''); } }, 6000); }
-  else { save.seen['hint' + G.P.L] = 1; persist(); G.hints = null; setHint(''); }
+  clearTimeout(advanceHint.tm);
+  if (G.hintStep < G.hints.length) { setHint(G.hints[G.hintStep]); advanceHint.tm = setTimeout(endHints, 6000); }
+  else endHints();
+}
+function endHints() {
+  clearTimeout(advanceHint.tm);
+  if (G.hints) { save.seen['hint' + G.hintL] = 1; persist(); }
+  G.hints = null; setHint('');
 }
 
 let cardQueue = [], cardNode = null;
@@ -1121,33 +1164,71 @@ function renderCard(t) {
 
 function fmtTime(s) { const m = Math.floor(s / 60), r = Math.round(s % 60); return m ? `${m} min ${r} s` : `${r} s`; }
 
+// Temps de référence pour la 3e étoile : grandit avec la taille de la carte.
+const parTime = P => 45 + P.nodeCount * 7;
+
 function finish(win) {
   if (G.over) return;
-  G.over = true; G.gest = null; G.sel.clear(); setHint('');
-  const L = G.P.L, time = G.t;
-  if (win) { save.best = Math.max(save.best, L + 1); save.level = L + 1; Snd.win(); vib(30); }
-  else { save.level = L; Snd.lose(); }
+  G.over = true; G.gest = null; G.sel.clear(); endHints();
+  const P = G.P, L = P.L, time = G.t;
+  let title = win ? 'Victoire' : 'Défaite', text, go, goTxt, stars = 0, skip = false;
+  if (win) { Snd.win(); vib(30); } else Snd.lose();
+  if (P.daily) {
+    if (win && !(save.daily && save.daily.d === P.daily && save.daily.t <= time)) save.daily = { d: P.daily, t: Math.round(time) };
+    text = win ? `Défi réussi en ${fmtTime(time)}. Un nouveau défi t’attend demain.` : 'Ta flotte a été anéantie. Le défi reste le même jusqu’à demain : réessaie.';
+    goTxt = win ? 'Rejouer le défi' : 'Réessayer'; go = startDaily;
+  } else if (win) {
+    stars = 1 + (G.lost ? 0 : 1) + (!G.lost && time <= parTime(P) ? 1 : 0);
+    const prevT = save.times[L];
+    save.stars[L] = Math.max(save.stars[L] || 0, stars);
+    save.times[L] = Math.round(prevT ? Math.min(prevT, time) : time);
+    save.best = Math.max(save.best, L + 1); save.level = L + 1; save.fail = null;
+    text = `Niveau ${L} terminé en ${fmtTime(time)}.` + (prevT && time < prevT ? ' Nouveau record !' : prevT ? ` Record : ${fmtTime(prevT)}.` : '');
+    if (stars < 3) text += G.lost ? ' Ne perds aucune planète pour plus d’étoiles.' : ` 3e étoile : finis en moins de ${fmtTime(parTime(P))}.`;
+    goTxt = `Jouer le niveau ${L + 1}`; go = () => startLevel(L + 1);
+  } else {
+    save.level = L;
+    save.fail = { L, n: save.fail && save.fail.L === L ? save.fail.n + 1 : 1 };
+    skip = save.fail.n >= 3 && save.best <= L;
+    text = 'Ta flotte a été anéantie. La carte reste la même : essaie une autre ouverture.';
+    goTxt = 'Réessayer'; go = () => startLevel(L);
+  }
   persist();
   setTimeout(() => {
-    if (G.mode !== 'play' || !G.over || G.P.L !== L) return;
-    $('endT').textContent = win ? 'Victoire' : 'Défaite';
-    $('endS').textContent = win ? `Niveau ${L} terminé en ${fmtTime(time)}.` : 'Ta flotte a été anéantie. La carte reste la même : essaie une autre ouverture.';
-    $('endGo').textContent = win ? `Jouer le niveau ${L + 1}` : 'Réessayer';
-    $('endGo').onclick = () => startLevel(win ? L + 1 : L);
+    if (G.mode !== 'play' || !G.over || G.P !== P) return;
+    $('endT').textContent = title; $('endS').textContent = text;
+    $('endStars').textContent = stars ? starStr(stars) : '';
+    $('endStars').hidden = !stars;
+    $('endGo').textContent = goTxt; $('endGo').onclick = go;
+    $('endSkip').hidden = !skip;
     showScreen('end'); $('endGo').focus();
   }, 1300);
 }
+$('endSkip').addEventListener('click', () => { const L = G.P.L; save.best = Math.max(save.best, L + 1); save.fail = null; startLevel(L + 1); });
+
+const levelName = P => P.daily ? 'Défi du jour' : `Niveau ${P.L}`;
+// Date locale AAAAMMJJ : le défi change à minuit, la carte est la même pour tous ce jour-là.
+function today() { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
+function startDaily() {
+  const day = today(), P = makeParams(12 + hash(day) % 24);
+  P.seed = hash(day * 13 + 5); P.daily = day;
+  play(P);
+}
+function restart() { if (G.P.daily) startDaily(); else startLevel(G.P.L); }
 
 function startLevel(L) {
+  save.level = L; persist();
+  play(makeParams(L));
+}
+function play(P) {
   Snd.ensure();
   G.mode = 'play'; G.paused = false; G.cardOpen = false;
   $('hud').hidden = false; $('dock').hidden = false; showScreen(null);
-  $('lvl').textContent = `Niveau ${L}`;
-  save.level = L; persist();
-  const P = makeParams(L);
+  $('lvl').textContent = levelName(P);
   buildWorld(P, false);
-  setupPower(); updateHud(); setHint('');
-  openCards(P, () => { intro(P); startHints(L); });
+  update(0);  // calcule flotte et maximum pour le HUD, même si une carte met le jeu en pause
+  setupPower(); updateHud(); endHints(); render();
+  openCards(P, () => { intro(P); if (!P.daily) startHints(P.L); });
 }
 
 function startDemo() {
@@ -1162,6 +1243,7 @@ function startDemo() {
 
 function toMenu() {
   G.mode = 'menu'; G.paused = false; G.cardOpen = false;
+  clearTimeout(advanceHint.tm); G.hints = null;
   $('hud').hidden = true; $('dock').hidden = true; setHint(''); $('intro').classList.remove('on');
   refreshMenu(); showScreen('menu');
   startDemo();
@@ -1170,15 +1252,19 @@ function toMenu() {
 /* ---------- Boucle ---------- */
 let last = performance.now();
 function frame(now) {
+  requestAnimationFrame(frame);
+  // 60 images/s au plus en jeu (écrans 120 Hz), 30 derrière le menu.
+  if (now - last < (G.mode === 'menu' ? 30 : 15)) return;
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
-  if (G.nodes.length && !(G.mode === 'play' && G.paused)) {
+  if (G.cardOpen) renderCard(now / 1000);
+  // En pause ou sur l'écran de fin, la scène est figée : on ne redessine rien.
+  if (G.mode === 'play' && (G.paused || !$('end').hidden)) return;
+  if (G.nodes.length) {
     const sp = G.mode === 'play' ? save.speed : 1;
     for (let i = 0; i < sp; i++) update(dt);
   }
   if (G.mode === 'play') { G.hudT -= dt; if (G.hudT <= 0) { G.hudT = 0.25; updateHud(); } }
   render();
-  if (G.cardOpen) renderCard(now / 1000);
-  requestAnimationFrame(frame);
 }
 
 buildSprites();
